@@ -3,7 +3,7 @@ heldKeys = {}
 world = {}
 
 local perlin = require "perlin" -- https://gist.github.com/kymckay/25758d37f8e3872e1636d90ad41fe2ed
-render_dist = 3
+render_dist = 7
 
 function lovr.load()
   -- Camera setup
@@ -69,19 +69,56 @@ function lovr.load()
 
 end
 
+chunkQueue = {}
+
 function lovr.update(dt)
   HandleMovement(dt)
 
-  local px = cam.x -- stands for player x
-  local pz = cam.z -- stands for player z
+  -- Determine which chunks should be present
+  local px, pz = cam.x, cam.z
+  local pcx, pcz = math.floor(px/chunkWidth), math.floor(pz/chunkWidth)
 
-  for _, chunk in ipairs(world) do
-    local x = chunk.ox
-    local z = chunk.oz
+  local shouldExist = {}
+  for x = -render_dist, render_dist do
+    for z = -render_dist, render_dist do
+      local cx = (x+pcx)*chunkWidth
+      local cz = (z+pcz)*chunkWidth
+      shouldExist[cx .. ',' .. cz] = true
+      if not IsChunkLoaded(cx, cz) and not IsChunkQueued(cx, cz) then
+        table.insert(chunkQueue, {x = cx, z = cz})
+      end
+    end
+  end
 
-    
+  -- Remove far-away chunks
+  for i = #world, 1, -1 do
+    local chunk = world[i]
+    if not shouldExist[chunk.ox .. ',' .. chunk.oz] then
+      table.remove(world, i)
+    end
+  end
+
+  -- Generate 1 queued chunk per frame
+  if #chunkQueue > 0 then
+    local nextChunk = table.remove(chunkQueue, 1)
+    GenerateChunk(nextChunk.x, 0, nextChunk.z)
   end
 end
+
+function IsChunkLoaded(x, z)
+  for _, chunk in ipairs(world) do
+    if chunk.ox == x and chunk.oz == z then return true end
+  end
+  return false
+end
+
+function IsChunkQueued(x, z)
+  for _, chunk in ipairs(chunkQueue) do
+    if chunk.x == x and chunk.z == z then return true end
+  end
+  return false
+end
+
 
 function lovr.draw(pass)
   pass:reset()
@@ -98,7 +135,7 @@ function lovr.draw(pass)
 
   pass:setShader(shader)
   pass:send('lightColor', {1.0, 1.0, 1.0, 1.0})
-  pass:send('lightPos', {cam.x, cam.y, cam.z})
+  pass:send('lightPos', {100, 200, 100})
   pass:send('ambience', {0.1, 0.1, 0.1, 1.0})
   pass:send('specularStrength', 0.1)
   pass:send('metallic', 32.0)
@@ -163,14 +200,22 @@ function GenerateChunk(world_x, world_y, world_z)
     oz = world_z
   }
 
+  local treesToPlace = {}
+
   for x = 1, chunkWidth do
     chunk.blocks[x] = {}
     for z = 1, chunkWidth do
       chunk.blocks[x][z] = {}
-      local height = math.floor(perlin:noise((x+world_x)*0.1, 0, (z+world_z)*0.1) * 10+60)
+      local noise = perlin:noise((x+world_x)*0.05, 0, (z+world_z)*0.05)
+      local shaped = math.pow((noise + 1) / 2, 4) -- normalize to [0, 1] then raise to ^4
+      local height = math.floor(shaped * 40 + 30) -- shape + scale + base height
+
       for y = 1, chunkHeight do
         if y == height then
           chunk.blocks[x][z][y] = "grass"
+          if math.random() < 0.01 then
+            table.insert(treesToPlace, {x = x, y = y+1, z = z})
+          end
         elseif y <= height/2+10 then
           chunk.blocks[x][z][y] = "deepslate"  
         elseif y+8 <= height then
@@ -182,6 +227,14 @@ function GenerateChunk(world_x, world_y, world_z)
         end
       end
     end
+  end
+
+  for _, v in ipairs(treesToPlace) do
+    chunk.blocks[v.x][v.z][v.y] = "log"
+    chunk.blocks[v.x][v.z][v.y+1] = "log"
+    chunk.blocks[v.x][v.z][v.y+2] = "log"
+    chunk.blocks[v.x][v.z][v.y+3] = "log"
+    chunk.blocks[v.x][v.z][v.y+4] = "log"
   end
 
   chunk.mesh = GenerateMesh(chunk)
@@ -219,6 +272,10 @@ function GenerateMesh(chunk)
             color.r = 0.2
             color.g = 0.2
             color.b = 0.2
+          elseif blocks[x][z][y] == "log" then
+            color.r = 0.2
+            color.g = 0.15
+            color.b = 0.1
           elseif blocks[x][z][y] == nil then
             goto continue
           end
