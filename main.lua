@@ -3,6 +3,7 @@ heldKeys = {}
 world = {}
 
 local perlin = require "perlin" -- https://gist.github.com/kymckay/25758d37f8e3872e1636d90ad41fe2ed
+render_dist = 3
 
 function lovr.load()
   -- Camera setup
@@ -58,8 +59,8 @@ function lovr.load()
   shader = lovr.graphics.newShader(defaultVertex, defaultFragment, {}) 
 
   -- World Generation
-  for x = -5, 5 do
-    for y = -5, 5 do
+  for x = -render_dist, render_dist do
+    for y = -render_dist, render_dist do
       GenerateChunk(x*chunkWidth, 0, y*chunkWidth)
     end
   end
@@ -70,7 +71,16 @@ end
 
 function lovr.update(dt)
   HandleMovement(dt)
-  
+
+  local px = cam.x -- stands for player x
+  local pz = cam.z -- stands for player z
+
+  for _, chunk in ipairs(world) do
+    local x = chunk.ox
+    local z = chunk.oz
+
+    
+  end
 end
 
 function lovr.draw(pass)
@@ -161,6 +171,8 @@ function GenerateChunk(world_x, world_y, world_z)
       for y = 1, chunkHeight do
         if y == height then
           chunk.blocks[x][z][y] = "grass"
+        elseif y <= height/2+10 then
+          chunk.blocks[x][z][y] = "deepslate"  
         elseif y+8 <= height then
           chunk.blocks[x][z][y] = "stone"  
         elseif y < height then
@@ -203,6 +215,10 @@ function GenerateMesh(chunk)
             color.r = 0.5
             color.g = 0.5
             color.b = 0.5  
+          elseif blocks[x][z][y] == "deepslate" then
+            color.r = 0.2
+            color.g = 0.2
+            color.b = 0.2
           elseif blocks[x][z][y] == nil then
             goto continue
           end
