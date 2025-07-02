@@ -8,15 +8,16 @@ render_dist = 7
 function lovr.load()
   -- Camera setup
   cam.v = 1 -- View
-  cam.x = 0
-  cam.y = 70
-  cam.z = 0
+  cam.x = 0 -- X position
+  cam.y = 70 -- Y position
+  cam.z = 0 -- Z position
   cam.a = 0 -- angle
   cam.p = 0 -- pitch
   cam.ax = 0
-  cam.ay = 1
+  cam.ay = 1 -- Rotation around  y axis
   cam.az = 0
 
+  -- Chunk size (16x16x256)
   chunkWidth = 16
   chunkHeight = 256
 
@@ -140,6 +141,7 @@ function lovr.draw(pass)
   pass:send('specularStrength', 0.1)
   pass:send('metallic', 32.0)
 
+  -- Draws each chunks mesh
   for _, chunk in ipairs(world) do
     pass:draw(chunk.mesh, 0, 0, 0)
   end
@@ -192,6 +194,10 @@ function HandleMovement(dt)
   if cam.p < -maxPitch then cam.p = -maxPitch end
 end
 
+function hash(x, y, z) -- For tree placement generation
+  return (math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453) % 1
+end
+
 function GenerateChunk(world_x, world_y, world_z)
   local chunk = {
     blocks = {},
@@ -206,35 +212,51 @@ function GenerateChunk(world_x, world_y, world_z)
     chunk.blocks[x] = {}
     for z = 1, chunkWidth do
       chunk.blocks[x][z] = {}
+
+      -- Intersting terrain by having higher points be elevated and lower points being placed further down
       local noise = perlin:noise((x+world_x)*0.05, 0, (z+world_z)*0.05)
-      local shaped = math.pow((noise + 1) / 2, 4) -- normalize to [0, 1] then raise to ^4
-      local height = math.floor(shaped * 40 + 30) -- shape + scale + base height
+      local shaped = math.pow((noise + 1) / 2, 4)
+      local height = math.floor(shaped * 40 + 30)
 
       for y = 1, chunkHeight do
         if y == height then
-          chunk.blocks[x][z][y] = "grass"
-          if math.random() < 0.01 then
-            table.insert(treesToPlace, {x = x, y = y+1, z = z})
+          chunk.blocks[x][z][y] = "grass" -- Places grass if the height matches the terrain height
+          if hash(x + world_x, y, z + world_z) < 0.005 then -- Decides wether to place a tree at the location
+            table.insert(treesToPlace, {x = x, y = y+1, z = z}) -- Adds location to treesToPlace
           end
-        elseif y <= height/2+10 then
-          chunk.blocks[x][z][y] = "deepslate"  
+        elseif y <= height/2+10 then -- Smooth out the shape to not match perfectly the shape of the terrain at top
+          chunk.blocks[x][z][y] = "deepslate"  -- Useless for now (not enough terrain height)
         elseif y+8 <= height then
-          chunk.blocks[x][z][y] = "stone"  
+          chunk.blocks[x][z][y] = "stone" -- Stone is placed 8 blocks deep  
         elseif y < height then
-          chunk.blocks[x][z][y] = "dirt"
+          chunk.blocks[x][z][y] = "dirt" -- Places dirt if it is under grass but not stone or deepslate
         else
-          chunk.blocks[x][z][y] = nil
+          chunk.blocks[x][z][y] = nil -- Nil for air blocks
         end
       end
     end
   end
 
   for _, v in ipairs(treesToPlace) do
-    chunk.blocks[v.x][v.z][v.y] = "log"
-    chunk.blocks[v.x][v.z][v.y+1] = "log"
-    chunk.blocks[v.x][v.z][v.y+2] = "log"
-    chunk.blocks[v.x][v.z][v.y+3] = "log"
-    chunk.blocks[v.x][v.z][v.y+4] = "log"
+    for i = 0, 5 do
+      chunk.blocks[v.x][v.z][v.y+i] = "log" -- Places logs
+    end
+
+    -- Creates a 3x3x4 block of leaves
+    for x = -1, 1 do
+      for z = -1, 1 do 
+        for y = 3, 6 do
+          if chunk.blocks[v.x+x] then
+            if chunk.blocks[v.x+x][v.z+z] then
+              if not chunk.blocks[v.x+x][v.z+z][v.y+y] then -- Only places leaf if the current block at location is air
+                chunk.blocks[v.x+x][v.z+z][v.y+y] = "leaf"
+              end
+            end
+          end
+        end
+      end
+    end
+
   end
 
   chunk.mesh = GenerateMesh(chunk)
@@ -242,133 +264,143 @@ function GenerateChunk(world_x, world_y, world_z)
   table.insert(world, chunk)
 end
 
+-- Generates a mesh for each chunk with only visible faces to improve performance
 function GenerateMesh(chunk)
   local worldX = chunk.ox
   local worldY = chunk.oy
   local worldZ = chunk.oz
   local blocks = chunk.blocks
 
+  -- The vertices that will be added into the mesh
   local vertices = {}
 
   for x = 1, #blocks do
     for z = 1, #blocks[x] do
-      for y = 1, #blocks[x][z] do
+      if blocks[x][z] then
+        for y = 1, #blocks[x][z] do
 
-          local color = {}
+            local color = {}
 
-          if blocks[x][z][y] == "grass" then
-            color.r = 0.3
-            color.g = 1.0
-            color.b = 0.4
-          elseif blocks[x][z][y] == "dirt" then
-            color.r = 0.36
-            color.g = 0.25
-            color.b = 0.20
-          elseif blocks[x][z][y] == "stone" then
-            color.r = 0.5
-            color.g = 0.5
-            color.b = 0.5  
-          elseif blocks[x][z][y] == "deepslate" then
-            color.r = 0.2
-            color.g = 0.2
-            color.b = 0.2
-          elseif blocks[x][z][y] == "log" then
-            color.r = 0.2
-            color.g = 0.15
-            color.b = 0.1
-          elseif blocks[x][z][y] == nil then
-            goto continue
-          end
-
-          locations = {}
-
-          if blocks[x][z][y+1] == nil then -- top
-            local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            -- Sets color based on which block it is
+            if blocks[x][z][y] == "grass" then
+              color.r = 0.3
+              color.g = 1.0
+              color.b = 0.4
+            elseif blocks[x][z][y] == "dirt" then
+              color.r = 0.36
+              color.g = 0.25
+              color.b = 0.20
+            elseif blocks[x][z][y] == "stone" then
+              color.r = 0.5
+              color.g = 0.5
+              color.b = 0.5  
+            elseif blocks[x][z][y] == "deepslate" then
+              color.r = 0.2
+              color.g = 0.2
+              color.b = 0.2
+            elseif blocks[x][z][y] == "log" then
+              color.r = 0.2
+              color.g = 0.15
+              color.b = 0.1
+            elseif blocks[x][z][y] == "leaf" then
+              color.r = 0.1
+              color.g = 1
+              color.b = 0.2
+            elseif blocks[x][z][y] == nil then
+              goto continue -- Skips to end if it is air
             end
-          end
 
-          if blocks[x][z][y-1] == nil then -- bottom
-            local toPlace =  {{x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            locations = {}
+
+            -- Adds each face depending on if it is visible
+            if not blocks[x][z][y+1] then -- top
+              local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
             end
-          end
 
-          local blockXP1 = blocks[x][z+1] and blocks[x][z+1] and blocks[x][z+1][y]
-          if blockXP1 == nil then -- front
-            local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            if not blocks[x][z][y-1] then -- bottom
+              local toPlace =  {{x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
             end
-          end
 
-          local blockXP1 = blocks[x][z-1] and blocks[x][z-1] and blocks[x][z-1][y]
-          if blockXP1 == nil then -- back
-            local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            local blockXP1 = blocks[x] and blocks[x][z+1] and blocks[x][z+1][y]
+            if blockXP1 == nil then -- front
+              local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
             end
-          end
 
-          local blockXP1 = blocks[x-1] and blocks[x-1][z] and blocks[x-1][z][y]
-          if blockXP1 == nil then -- left
-            local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
-                              {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            local blockXP1 = blocks[x] and blocks[x][z-1] and blocks[x][z-1][y]
+            if blockXP1 == nil then -- back
+              local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
             end
-          end
 
-          local blockXP1 = blocks[x+1] and blocks[x+1][z] and blocks[x+1][z][y]
-          if blockXP1 == nil then -- right
-            local toPlace =  {{x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
-                              {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1}}
-            
-            for _, v in ipairs(toPlace) do
-              table.insert(locations, v)
+            local blockXP1 = blocks[x-1] and blocks[x-1][z] and blocks[x-1][z][y]
+            if blockXP1 == nil then -- left
+              local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
+                                {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
             end
-          end
 
-          for _, v in ipairs(locations) do
-            table.insert(vertices, v)
-          end
+            local blockXP1 = blocks[x+1] and blocks[x+1][z] and blocks[x+1][z][y]
+            if blockXP1 == nil then -- right
+              local toPlace =  {{x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
+                                {x + 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1}}
+              
+              for _, v in ipairs(toPlace) do
+                table.insert(locations, v)
+              end
+            end
 
-          ::continue::
+            for _, v in ipairs(locations) do
+              table.insert(vertices, v)
+            end
+
+            ::continue::
+          end
       end
     end
   end
