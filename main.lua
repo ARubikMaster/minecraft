@@ -219,7 +219,9 @@ function GenerateChunk(world_x, world_y, world_z)
       local height = math.floor(shaped * 40 + 30)
 
       for y = 1, chunkHeight do
-        if y == height then
+        if y == height and y < 32 then
+          chunk.blocks[x][z][y] = "sand" 
+        elseif y == height then
           chunk.blocks[x][z][y] = "grass" -- Places grass if the height matches the terrain height
           if hash(x + world_x, y, z + world_z) < 0.005 then -- Decides wether to place a tree at the location
             table.insert(treesToPlace, {x = x, y = y+1, z = z}) -- Adds location to treesToPlace
@@ -237,6 +239,7 @@ function GenerateChunk(world_x, world_y, world_z)
     end
   end
 
+  --[[
   for _, v in ipairs(treesToPlace) do
     for i = 0, 5 do
       chunk.blocks[v.x][v.z][v.y+i] = "log" -- Places logs
@@ -258,6 +261,7 @@ function GenerateChunk(world_x, world_y, world_z)
     end
 
   end
+  --]]
 
   chunk.mesh = GenerateMesh(chunk)
 
@@ -306,6 +310,10 @@ function GenerateMesh(chunk)
               color.r = 0.1
               color.g = 1
               color.b = 0.2
+            elseif blocks[x][z][y] == "sand" then
+               color.r = 0.96
+               color.g = 0.84
+               color.b = 0.70  
             elseif blocks[x][z][y] == nil then
               goto continue -- Skips to end if it is air
             end
