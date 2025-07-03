@@ -3,7 +3,7 @@ heldKeys = {}
 world = {}
 
 local perlin = require "perlin" -- https://gist.github.com/kymckay/25758d37f8e3872e1636d90ad41fe2ed
-render_dist = 9
+render_dist = 8
 
 function lovr.load()
   -- Camera setup
@@ -66,7 +66,7 @@ function lovr.load()
     end
   end
 
-  sky = lovr.graphics.newTexture('sky.png')
+  -- sky = lovr.graphics.newTexture('sky.png')
 
 end
 
@@ -132,7 +132,8 @@ function lovr.draw(pass)
   local quat = yawQuat:mul(pitchQuat)
   pass:setViewPose(cam.v, cam.x, cam.y, cam.z, quat)
 
-  pass:skybox(sky)
+  --pass:skybox(sky)
+  lovr.graphics.setBackgroundColor(0.788, 0.914, 0.965)
 
   pass:setShader(shader)
   pass:send('lightColor', {1.0, 1.0, 1.0, 1.0})
@@ -150,6 +151,10 @@ function lovr.draw(pass)
   for _, chunk in ipairs(world) do
     if chunk.watermesh ~= nil then
       pass:draw(chunk.watermesh, 0, 0, 0)
+    end
+
+    if chunk.cloudmesh ~= nil then
+      pass:draw(chunk.cloudmesh, 0, 0, 0)
     end
   end
 
@@ -275,9 +280,52 @@ function GenerateChunk(world_x, world_y, world_z)
   --]]
 
   chunk.mesh, chunk.watermesh = GenerateMesh(chunk)
+  chunk.cloudmesh = GenerateClouds(chunk)
 
   table.insert(world, chunk)
 end
+
+function GenerateClouds(chunk)
+  local worldX = chunk.ox
+  local worldZ = chunk.oz
+  local clouds = {}
+  local scale = 0.05
+
+  for xi = 0, 3 do
+    for zi = 0, 3 do
+      local x = worldX + xi * 4
+      local z = worldZ + zi * 4
+
+      local noise = (perlin:noise(x * scale, 42, z * scale) + 1) / 2
+      if noise <= 0.5 then
+        local y = 80
+
+        local toPlace = {
+          {x - 2, y, z - 2, 0, -1, 0, 1, 1, 1, 0.4},
+          {x - 2, y, z + 2, 0, -1, 0, 1, 1, 1, 0.4},
+          {x + 2, y, z + 2, 0, -1, 0, 1, 1, 1, 0.4},
+
+          {x + 2, y, z + 2, 0, -1, 0, 1, 1, 1, 0.4},
+          {x + 2, y, z - 2, 0, -1, 0, 1, 1, 1, 0.4},
+          {x - 2, y, z - 2, 0, -1, 0, 1, 1, 1, 0.4}
+        }
+
+        for _, v in ipairs(toPlace) do
+          table.insert(clouds, v)
+        end
+      end
+    end
+  end
+
+  if #clouds > 0 then
+    return lovr.graphics.newMesh({
+      { 'VertexPosition', 'vec3' },
+      { 'VertexNormal', 'vec3' },
+      { 'VertexColor', 'vec4' }
+    }, clouds)
+  end
+end
+
 
 -- Generates a mesh for each chunk with only visible faces to improve performance
 function GenerateMesh(chunk)
