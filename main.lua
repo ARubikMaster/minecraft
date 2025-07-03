@@ -3,7 +3,7 @@ heldKeys = {}
 world = {}
 
 local perlin = require "perlin" -- https://gist.github.com/kymckay/25758d37f8e3872e1636d90ad41fe2ed
-render_dist = 7
+render_dist = 9
 
 function lovr.load()
   -- Camera setup
@@ -146,6 +146,13 @@ function lovr.draw(pass)
     pass:draw(chunk.mesh, 0, 0, 0)
   end
 
+  pass:setShader()
+  for _, chunk in ipairs(world) do
+    if chunk.watermesh ~= nil then
+      pass:draw(chunk.watermesh, 0, 0, 0)
+    end
+  end
+
 end
 
 function HandleMovement(dt)
@@ -203,7 +210,7 @@ function GenerateChunk(world_x, world_y, world_z)
     blocks = {},
     ox = world_x,
     oy = world_y,
-    oz = world_z
+    oz = world_z,
   }
 
   local treesToPlace = {}
@@ -215,7 +222,7 @@ function GenerateChunk(world_x, world_y, world_z)
 
       -- Intersting terrain by having higher points be elevated and lower points being placed further down
       local noise = perlin:noise((x+world_x)*0.05, 0, (z+world_z)*0.05)
-      local shaped = math.pow((noise + 1) / 2, 4)
+      local shaped = math.pow((noise + 1) / 2, 5)
       local height = math.floor(shaped * 40 + 30)
 
       for y = 1, chunkHeight do
@@ -224,7 +231,9 @@ function GenerateChunk(world_x, world_y, world_z)
         elseif y == height then
           chunk.blocks[x][z][y] = "grass" -- Places grass if the height matches the terrain height
           if hash(x + world_x, y, z + world_z) < 0.005 then -- Decides wether to place a tree at the location
-            table.insert(treesToPlace, {x = x, y = y+1, z = z}) -- Adds location to treesToPlace
+            if x >= 2 and x <= chunkWidth - 2 and z >= 2 and z <= chunkWidth - 2 then
+              table.insert(treesToPlace, {x = x, y = y+1, z = z}) -- Adds location to treesToPlace
+            end
           end
         elseif y <= height/2+10 then -- Smooth out the shape to not match perfectly the shape of the terrain at top
           chunk.blocks[x][z][y] = "deepslate"  -- Useless for now (not enough terrain height)
@@ -232,6 +241,8 @@ function GenerateChunk(world_x, world_y, world_z)
           chunk.blocks[x][z][y] = "stone" -- Stone is placed 8 blocks deep  
         elseif y < height then
           chunk.blocks[x][z][y] = "dirt" -- Places dirt if it is under grass but not stone or deepslate
+        elseif y == 31 then
+          chunk.blocks[x][z][y] = "water"  
         else
           chunk.blocks[x][z][y] = nil -- Nil for air blocks
         end
@@ -239,7 +250,7 @@ function GenerateChunk(world_x, world_y, world_z)
     end
   end
 
-  --[[
+  ---[[
   for _, v in ipairs(treesToPlace) do
     for i = 0, 5 do
       chunk.blocks[v.x][v.z][v.y+i] = "log" -- Places logs
@@ -263,7 +274,7 @@ function GenerateChunk(world_x, world_y, world_z)
   end
   --]]
 
-  chunk.mesh = GenerateMesh(chunk)
+  chunk.mesh, chunk.watermesh = GenerateMesh(chunk)
 
   table.insert(world, chunk)
 end
@@ -276,52 +287,52 @@ function GenerateMesh(chunk)
   local blocks = chunk.blocks
 
   -- The vertices that will be added into the mesh
-  local vertices = {}
+  vertices = {}
+  waterVertices = {}
 
   for x = 1, #blocks do
     for z = 1, #blocks[x] do
       if blocks[x][z] then
-        for y = 1, #blocks[x][z] do
+        for y in pairs(blocks[x][z]) do -- ty kelly!
+
+            if blocks[x][z][y] == nil then
+              goto continue
+            end
+
+            local blockType = blocks[x][z][y]
+            local isWater = blockType == "water"
 
             local color = {}
 
-            -- Sets color based on which block it is
-            if blocks[x][z][y] == "grass" then
-              color.r = 0.3
-              color.g = 1.0
-              color.b = 0.4
-            elseif blocks[x][z][y] == "dirt" then
-              color.r = 0.36
-              color.g = 0.25
-              color.b = 0.20
-            elseif blocks[x][z][y] == "stone" then
-              color.r = 0.5
-              color.g = 0.5
-              color.b = 0.5  
-            elseif blocks[x][z][y] == "deepslate" then
-              color.r = 0.2
-              color.g = 0.2
-              color.b = 0.2
-            elseif blocks[x][z][y] == "log" then
-              color.r = 0.2
-              color.g = 0.15
-              color.b = 0.1
-            elseif blocks[x][z][y] == "leaf" then
-              color.r = 0.1
-              color.g = 1
-              color.b = 0.2
-            elseif blocks[x][z][y] == "sand" then
-               color.r = 0.96
-               color.g = 0.84
-               color.b = 0.70  
-            elseif blocks[x][z][y] == nil then
-              goto continue -- Skips to end if it is air
+            -- Set color depending on block type
+            if blockType == "grass" then
+              color = { r = 0.3, g = 1.0, b = 0.4 }
+            elseif blockType == "dirt" then
+              color = { r = 0.36, g = 0.25, b = 0.20 }
+            elseif blockType == "stone" then
+              color = { r = 0.5, g = 0.5, b = 0.5 }
+            elseif blockType == "deepslate" then
+              color = { r = 0.2, g = 0.2, b = 0.2 }
+            elseif blockType == "log" then
+              color = { r = 0.2, g = 0.15, b = 0.1 }
+            elseif blockType == "leaf" then
+              color = { r = 0.1, g = 1.0, b = 0.2 }
+            elseif blockType == "sand" then
+              color = { r = 0.96, g = 0.84, b = 0.70 }
+            elseif blockType == "water" then
+              goto water
+            else
+              goto continue
             end
 
             locations = {}
 
+            function isTransparent(blockType)
+              return blockType == nil or blockType == "water"
+            end
+
             -- Adds each face depending on if it is visible
-            if not blocks[x][z][y+1] then -- top
+            if isTransparent(blocks[x][z][y+1]) then -- top
               local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 1, 0, color.r, color.g, color.b, 1},
@@ -334,7 +345,7 @@ function GenerateMesh(chunk)
               end
             end
 
-            if not blocks[x][z][y-1] then -- bottom
+            if isTransparent(blocks[x][z][y-1]) then -- bottom
               local toPlace =  {{x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, -1, 0, color.r, color.g, color.b, 1},
@@ -347,8 +358,8 @@ function GenerateMesh(chunk)
               end
             end
 
-            local blockXP1 = blocks[x] and blocks[x][z+1] and blocks[x][z+1][y]
-            if blockXP1 == nil then -- front
+            blockXP1 = blocks[x] and blocks[x][z+1] and blocks[x][z+1][y]
+            if isTransparent(blockXP1) then -- front
               local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y - 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 0, 0, 1, color.r, color.g, color.b, 1},
@@ -361,8 +372,8 @@ function GenerateMesh(chunk)
               end
             end
 
-            local blockXP1 = blocks[x] and blocks[x][z-1] and blocks[x][z-1][y]
-            if blockXP1 == nil then -- back
+            blockXP1 = blocks[x] and blocks[x][z-1] and blocks[x][z-1][y]
+            if isTransparent(blockXP1) then -- back
               local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 0, 0, -1, color.r, color.g, color.b, 1},
@@ -375,8 +386,8 @@ function GenerateMesh(chunk)
               end
             end
 
-            local blockXP1 = blocks[x-1] and blocks[x-1][z] and blocks[x-1][z][y]
-            if blockXP1 == nil then -- left
+            blockXP1 = blocks[x-1] and blocks[x-1][z] and blocks[x-1][z][y]
+            if isTransparent(blockXP1) then -- left
               local toPlace =  {{x - 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
                                 {x - 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, -1, 0, 0, color.r, color.g, color.b, 1},
@@ -389,8 +400,8 @@ function GenerateMesh(chunk)
               end
             end
 
-            local blockXP1 = blocks[x+1] and blocks[x+1][z] and blocks[x+1][z][y]
-            if blockXP1 == nil then -- right
+            blockXP1 = blocks[x+1] and blocks[x+1][z] and blocks[x+1][z][y]
+            if isTransparent(blockXP1) then -- right
               local toPlace =  {{x + 0.5 + worldX, y + 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y - 0.5 + worldY, z - 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
                                 {x + 0.5 + worldX, y + 0.5 + worldY, z + 0.5 + worldZ, 1, 0, 0, color.r, color.g, color.b, 1},
@@ -407,6 +418,31 @@ function GenerateMesh(chunk)
               table.insert(vertices, v)
             end
 
+            goto continue
+
+            ::water::
+
+            locations = {}
+
+            local toPlace = {
+              {x - 0.5 + worldX, y + 0.3 + worldY, z - 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4},
+              {x - 0.5 + worldX, y + 0.3 + worldY, z + 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4},
+              {x + 0.5 + worldX, y + 0.3 + worldY, z + 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4},
+
+              {x + 0.5 + worldX, y + 0.3 + worldY, z + 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4},
+              {x + 0.5 + worldX, y + 0.3 + worldY, z - 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4},
+              {x - 0.5 + worldX, y + 0.3 + worldY, z - 0.5 + worldZ, 0, 1, 0, 0.0, 0.4, 0.8, 0.4}
+            }
+
+              
+            for _, v in ipairs(toPlace) do
+              table.insert(locations, v)
+            end
+
+            for _, v in ipairs(locations) do
+              table.insert(waterVertices, v)
+            end
+
             ::continue::
           end
       end
@@ -419,7 +455,17 @@ function GenerateMesh(chunk)
     { 'VertexColor', 'vec4' }
   }, vertices)
 
-  return chunkMesh
+  if #waterVertices ~= 0 then
+    waterMesh = lovr.graphics.newMesh({
+      { 'VertexPosition', 'vec3' },
+      { 'VertexNormal', 'vec3'},
+      { 'VertexColor', 'vec4' }
+    }, waterVertices)
+  else
+    waterMesh = nil
+  end
+
+  return chunkMesh, waterMesh
 end
 
 function lovr.keypressed(key, scancode, isrepeat)
